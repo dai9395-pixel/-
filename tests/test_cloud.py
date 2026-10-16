@@ -9,10 +9,10 @@ from urllib.request import Request,urlopen
 from urllib.error import HTTPError,URLError
 from unittest.mock import patch
 from api.index import handler
-from lib.cloud_store import CloudStore,StoreError
+from lib.cloud_store import CloudStore,Supabase,StoreError
 
-PASSWORD='a-fictional-test-password-only'
-ENV={'ADMIN_PASSWORD':PASSWORD,'SUPABASE_URL':'https://example.supabase.co','SUPABASE_SERVICE_ROLE_KEY':'test-only-key'}
+PASSWORD='fictional-user-access-token'
+ENV={'VITE_SUPABASE_URL':'https://example.supabase.co','VITE_SUPABASE_ANON_KEY':'test-only-key'}
 DATA={'name':'架空スタッフ','store':'架空店舗','role':'スタイリスト','sales':[],'skills':[],'interviews':[],'progress':0}
 class Response(io.BytesIO):
     def __init__(self,value):super().__init__(json.dumps(value).encode())
@@ -22,9 +22,10 @@ class CloudTest(unittest.TestCase):
     def test_database_contract_and_atomic_conflict(self):
         with patch('lib.cloud_store.urlopen') as upstream:
             upstream.return_value=Response([{'id':1,'version':1,'data':DATA}])
-            store=CloudStore();self.assertEqual(store.list()[0]['name'],'架空スタッフ')
+            with patch.object(CloudStore,'__init__',return_value=None):store=CloudStore('access-token')
+            store.url='https://example.supabase.co';store.key='test-only-key';store.token='access-token';self.assertEqual(store.list()[0]['name'],'架空スタッフ')
             req=upstream.call_args.args[0]
-            self.assertIn('/rest/v1/staff?',req.full_url);self.assertEqual(req.get_header('Authorization'),'Bearer test-only-key')
+            self.assertIn('/rest/v1/staff?',req.full_url);self.assertEqual(req.get_header('Authorization'),'Bearer access-token')
             upstream.return_value=Response([{'id':2,'version':1,'data':DATA}]);self.assertEqual(store.create(DATA)['id'],2)
             upstream.return_value=Response([{'id':2,'version':2,'data':DATA}]);self.assertEqual(store.update(2,1,DATA)['version'],2)
             req=upstream.call_args.args[0];self.assertIn('version=eq.1',req.full_url);self.assertEqual(req.method,'PATCH')
@@ -34,11 +35,35 @@ class CloudTest(unittest.TestCase):
             upstream.return_value=Response([{'id':2}]);self.assertEqual(store.delete(2,2),{'ok':True})
     def test_database_outage_does_not_leak_details(self):
         with patch('lib.cloud_store.urlopen',side_effect=URLError('private connection details test-only-key')):
-            with self.assertRaises(StoreError) as error:CloudStore().list()
+            with self.assertRaises(StoreError) as error:Supabase().request('/rest/v1/staff')
             self.assertEqual(error.exception.status,502);self.assertNotIn('test-only-key',str(error.exception))
     def test_configuration_is_required(self):
-        with patch.dict(os.environ,{'SUPABASE_URL':''}):
-            with self.assertRaises(StoreError):CloudStore()
+        with patch.dict(os.environ,{'VITE_SUPABASE_URL':'','SUPABASE_URL':''}):
+            with self.assertRaises(StoreError):Supabase()
+    def test_verified_user_and_database_admin_permission(self):
+        with patch('lib.cloud_store.urlopen',side_effect=[Response({'id':'user-1'}),Response(True)]) as upstream:
+            store=CloudStore('verified-access-token')
+            self.assertEqual(store.token,'verified-access-token')
+            self.assertTrue(upstream.call_args_list[0].args[0].full_url.endswith('/auth/v1/user'))
+            self.assertTrue(upstream.call_args_list[1].args[0].full_url.endswith('/rest/v1/rpc/is_karte_admin'))
+        with patch('lib.cloud_store.urlopen',side_effect=[Response({'id':'user-2'}),Response(False)]):
+            with self.assertRaises(StoreError) as denied:CloudStore('unapproved-user-token')
+            self.assertEqual(denied.exception.status,403)
+        with patch('lib.cloud_store.urlopen',side_effect=HTTPError('https://example.supabase.co',401,'Unauthorized',{},None)):
+            with self.assertRaises(StoreError) as denied:CloudStore('forged-token')
+            self.assertEqual(denied.exception.status,401)
+    def test_login_refresh_and_secret_key_rejection(self):
+        result={'access_token':'access','refresh_token':'refresh','expires_in':3600,'user':{'private':'not-returned'}}
+        with patch('lib.cloud_store.urlopen',return_value=Response(result)) as upstream:
+            session=Supabase().login({'email':'admin@example.test','password':'fictional-test'})
+            self.assertNotIn('user',session)
+            self.assertEqual(json.loads(upstream.call_args.args[0].data)['email'],'admin@example.test')
+        with patch('lib.cloud_store.urlopen',return_value=Response(result)) as upstream:
+            Supabase().refresh({'refresh_token':'refresh'})
+            self.assertIn('grant_type=refresh_token',upstream.call_args.args[0].full_url)
+        with patch.dict(os.environ,{'VITE_SUPABASE_ANON_KEY':'sb_secret_test-only'}):
+            with self.assertRaises(StoreError):Supabase()
+
     def test_http_auth_crud_and_validation(self):
         server=ThreadingHTTPServer(('127.0.0.1',0),handler)
         thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
@@ -48,8 +73,15 @@ class CloudTest(unittest.TestCase):
                 with urlopen(req) as response:return response.status,json.load(response)
             except HTTPError as error:return error.code,json.load(error)
         try:
+            with patch('api.index.Supabase') as auth:
+                auth.return_value.login.return_value={'access_token':'access','refresh_token':'refresh','expires_in':3600}
+                status,result=request('POST',{'email':'admin@example.test','password':'fictional-test'},password='',path='/api/index?auth_action=login')
+                self.assertEqual(status,200);self.assertEqual(result['access_token'],'access')
+                auth.return_value.refresh.return_value={'access_token':'new','refresh_token':'refresh2','expires_in':3600}
+                self.assertEqual(request('POST',{'refresh_token':'refresh'},password='',path='/api/index?auth_action=refresh')[1]['access_token'],'new')
+                self.assertEqual(request('POST',{},path='/api/index?auth_action=logout')[0],200)
             with patch('api.index.CloudStore') as store:
-                self.assertEqual(request(password='wrong')[0],401);store.assert_not_called()
+                self.assertEqual(request(password='')[0],401);store.assert_not_called()
                 store.return_value.list.return_value=[{**DATA,'id':1,'version':1}]
                 status,rows=request();self.assertEqual(status,200);self.assertNotIn('test-only-key',json.dumps(rows))
                 store.return_value.create.return_value={**DATA,'id':2,'version':1}
@@ -60,7 +92,7 @@ class CloudTest(unittest.TestCase):
                 store.return_value.delete.return_value={'ok':True}
                 self.assertEqual(request('DELETE',{'version':2},path='/api/index?staff_id=2')[0],200)
                 self.assertEqual(request('DELETE',{},path='/api/index?staff_id=2')[0],400)
-                with patch.dict(os.environ,{'ADMIN_PASSWORD':''}):self.assertEqual(request()[0],503)
+                store.side_effect=StoreError(403,'管理者未登録');self.assertEqual(request()[0],403)
         finally:server.shutdown();server.server_close();thread.join()
 
 if __name__=='__main__':unittest.main()

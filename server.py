@@ -108,6 +108,23 @@ class Handler(SimpleHTTPRequestHandler):
     def do_DELETE(self): self.mutate('DELETE')
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser(); parser.add_argument('--host',default='127.0.0.1'); parser.add_argument('--port',type=int,default=8000); args=parser.parse_args()
-    initialize(); print(f'スタッフ成長カルテ http://{args.host}:{args.port}',flush=True)
-    ThreadingHTTPServer((args.host,args.port),Handler).serve_forever()
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--host',default='127.0.0.1')
+    parser.add_argument('--port',type=int,default=8000)
+    parser.add_argument('--cloud',action='store_true',help='Use Supabase Auth / PostgreSQL instead of local SQLite')
+    args=parser.parse_args()
+    selected_handler=Handler
+    if args.cloud:
+        from api.index import handler as CloudHandler
+        class CloudDevelopmentHandler(CloudHandler, SimpleHTTPRequestHandler):
+            def __init__(self,*values,**kwargs):
+                SimpleHTTPRequestHandler.__init__(self,*values,directory=str(ROOT/'public'),**kwargs)
+            def do_GET(self):
+                if self.path=='/runtime.json':return self.reply(200,{'authentication':True})
+                if self.path.startswith('/api/'):return CloudHandler.do_GET(self)
+                return SimpleHTTPRequestHandler.do_GET(self)
+        selected_handler=CloudDevelopmentHandler
+    else:
+        initialize()
+    print(f"スタッフ成長カルテ ({'Supabase' if args.cloud else 'SQLite sample'}) http://{args.host}:{args.port}",flush=True)
+    ThreadingHTTPServer((args.host,args.port),selected_handler).serve_forever()

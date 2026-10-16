@@ -4,9 +4,15 @@
 
 ## iPadだけで使うクラウド版（Vercel + Supabase）
 
-[公開手順はこちら](DEPLOY.md)。Vercel上のPython APIからSupabase PostgreSQLへ保存し、管理者パスワードでアクセスを制限します。PCの常時起動は不要です。設定例は `.env.example`、DB作成と架空データ15名の投入は `supabase/setup.sql` にあります。秘密キーはVercelの環境変数にのみ設定してください。実際のクラウド接続・公開はアカウント作成と設定後に検証が必要です。
+[Supabase接続・公開手順はこちら](DEPLOY.md)。VercelのPython APIからSupabase Authで本人確認し、ログインユーザーのJWTでPostgreSQLへ保存します。RLSにより、明示的に許可された管理者だけが全スタッフの読み書きを行えます。PCの常時起動は不要です。
+
+環境変数は `VITE_SUPABASE_URL` と `VITE_SUPABASE_ANON_KEY` に対応します。設定例は `.env.example`、テーブル・架空データ15名・RLSの統合SQLは `supabase/install.sql`、管理者許可は `supabase/003_add_admin.sql` です。service_roleキー・旧ADMIN_PASSWORDは不要です。実際のクラウド接続は設定とSQL実行後に別途検証します。
 
 クラウド版の構成：`api/index.py`（認証付きAPI）、`lib/cloud_store.py`（Supabase REST）、`scripts/build.py`（静的ファイルの出力）、`vercel.json`（ルーティング・ヘッダー）、`public/auth.js`（ログイン）。依存パッケージは不要です。
+
+## Supabase版を開発環境で確認する
+
+環境に接続変数2つを安全に設定したうえで `python server.py --cloud --port 8000` を起動します。Supabase Authと同じAPIを使用し、SQLiteは作成・参照しません。設定値はコードやコマンド履歴へ直接書かないでください。SQLの実行と管理者許可はクラウド版と同じ手順が必要です。
 
 ## ローカルSQLite版の起動
 
@@ -34,7 +40,7 @@ iPadなど別の端末からアクセスする場合は、信頼できるロー�
 - 面談は追加・編集可能。過去の面談を日付順に展開して確認。
 - スタッフ削除は確認後にすべての関連記録を削除します。
 
-## 保存とバックアップ
+## ローカルSQLite版の保存とバックアップ
 
 `data/karte.sqlite3` にサーバー側で自動保存します。ブラウザーを閉じたりサーバーを再起動しても保持されます。初回のサンプル投入は一度のみで、スタッフ全員を削除しても再投入しません。DBはGit管理対象外です。
 
@@ -47,7 +53,7 @@ iPadなど別の端末からアクセスする場合は、信頼できるロー�
 - `GET /api/staff` / `POST /api/staff` / `PUT /api/staff/:id` / `DELETE /api/staff/:id`
 - 更新と削除には読み込み時の `version` が必要です。古い版からの書き込みは409で拒否し、意図しない上書きを防ぎます。エラー時は画面の再読み込みが必要です。
 
-画面とAPIを分離しているため、複数人運用へ拡張する際は認証、店舗別権限、監査ログ、HTTPS、本番用Webサーバー、定期バックアップを追加できます。データ量・同時利用数に応じてDBをPostgreSQLなどへ移行してください。ローカルの `server.py` は開発・試用用です。クラウド版もまずは架空データで試用してください。
+クラウド版はSupabase AuthとPostgreSQL RLSで管理者を認証・制限します。将来は店舗別権限、監査ログ、MFAなどを追加できます。ローカルの `server.py` は開発・試用用です。クラウド版もまずは架空データで試用してください。
 
 ## 動作確認
 
@@ -67,3 +73,11 @@ node tests/browser.cjs
 ```
 
 `CHROMIUM_PATH` でブラウザーの実行ファイルを指定できます（既定 `/usr/bin/chromium`）。一時DB・ポート18082を使用し、登録・保存・計算・再読み込み・削除・検索、1194/834/768/390pxの画面幅とJavaScriptエラーを確認します。
+
+PostgreSQLの権限・永続化テスト（任意、PGliteが必要）:
+
+```bash
+PGLITE_MODULE=/path/to/@electric-sql/pglite node tests/auth_schema.cjs
+```
+
+Supabase Authはモック、RLSは実際のSQLをPostgreSQL互換エンジンで実行します。未ログイン・非管理者・自己昇格の拒否、許可管理者のCRUDと権限取り消し、DB再起動後の保持を確認します。

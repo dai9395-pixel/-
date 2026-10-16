@@ -1,79 +1,110 @@
-# iPadのSafariだけで公開する手順
+# Supabase接続・認証の設定（iPadのSafari対応）
 
-VercelでWeb画面とPython APIを公開し、SupabaseのPostgreSQLに保存します。PCの常時起動は不要です。Vercelの再起動・再デプロイでデータは消えません。公開URLはデプロイ完了後にVercelが発行します。この手順の作成だけでは公開は完了しません。
+VercelのWeb画面 → Python API → Supabase Auth / PostgreSQL の構成です。APIはログインユーザーのJWTを検証し、そのユーザーの権限でDBへアクセスします。RLS（行レベルセキュリティ）が直接のDBアクセスにも適用されます。管理者として許可されたユーザーだけが全15名のカルテを管理できます。
 
-まずは架空データ専用の試用環境です。Safariで各サービスにログインし、文字が小さい場合はSafariのページメニューから「デスクトップ用Webサイトを表示」を選んでください。サービスのプラン・利用上限・無料環境の休止条件は申込画面で確認してください。
+共有パスワードやservice_roleキーを使う旧方式から変更しました。スタッフデータは既存の `staff` テーブルに維持し、削除・上書きしません。旧SQLiteのデータは自動移行しません。
 
-## 1. GitHubにコードを用意
+## 1. 環境変数の確認
 
-対象リポジトリは `dai9395-pixel/-` です。このリポジトリに、このプロジェクトのファイル（`vercel.json`、`api/`、`lib/`、`server.py`、`scripts/`、`public/`、`supabase/`）が反映されていることを確認します。
+Vercel → 対象Project → Settings → Environment Variablesに以下を設定します。既存の値が正しければ再入力は不要です。**名前には空白ではなくアンダースコアを使います。**
 
-秘密キー・実データ・`data/`・`.env` はGitHubへ登録しません。GitHubの認証情報をチャットに送る必要はありません。
-
-## 2. Supabaseのアカウントとプロジェクトを作成
-
-1. Safariで https://supabase.com/dashboard を開き、GitHubアカウントなどで登録します。
-2. 組織を作成し、「New project」から `staff-growth-karte` プロジェクトを作成します。
-3. データベースのパスワードを生成して、iPadのパスワード管理に保存します。このパスワードはアプリのログインパスワードとは別です。
-4. 利用可能なら日本に近いリージョンを選び、作成完了を待ちます。
-5. 「SQL Editor」→新しいクエリを開きます。GitHubで `supabase/setup.sql` を開き、「Raw」でファイルの内容全体をコピーし、SQL Editorへ貼り付けて「Run」を押します。
-6. 「Table Editor」の `staff` に架空スタッフ15行があることを確認します。必要ならSQL Editorで `SELECT count(*) FROM public.staff;` を実行します。
-
-`setup.sql` は再実行しても既存のスタッフや編集内容を上書きしません。全員を削除した後もサンプルを復活させません。旧SQLiteからの個人情報の移行は行いません。
-
-## 3. Supabaseの接続情報を確認
-
-プロジェクトの「Connect」または「Settings」→「API / API Keys」で次を確認します（名称は管理画面の更新で変わることがあります）。
-
-- **Project URL**: `https://プロジェクト識別子.supabase.co`
-- **Legacy API Keysの `service_role` キー**: サーバー専用の秘密キー。`anon` や publishable キーではありません。
-
-URLとキーは次のVercel設定に入力します。**service_roleキーはGitHub、画面のソース、チャットに貼り付けないでください。** このキーはRLSを迂回できるため、サーバー内に限定します。SQLはブラウザーから使う `anon` / `authenticated` ロールの読み書きを拒否します。
-
-## 4. Vercelへ登録してGitHubから取り込む
-
-1. Safariで https://vercel.com/signup を開き、GitHubで登録します。
-2. 「Add New…」→「Project」からGitHubを接続します。必要ならVercelのGitHub連携に対象リポジトリへのアクセスを許可します。
-3. `dai9395-pixel/-` を選び「Import」を押します。
-4. **Project Nameを `staff-growth-karte` など有効な名前に変更**してください（元のリポジトリ名 `-` はプロジェクト名に適しません）。
-5. Framework Presetは **Other**、Root Directoryはリポジトリのルート（空欄または `./`）にします。
-6. Build Command / Output Directoryは `vercel.json` から読み込ませます。手動指定が必要なら Build Commandは `python3 scripts/build.py`、Output Directoryは `dist`、Install Commandは空欄です。npmパッケージのインストールは不要です。
-7. デプロイ前の「Environment Variables」に次の3つを追加します。秘密情報はここへ直接入力します。Productionを対象に設定し、Previewでも試す場合はPreviewにも同じ設定が必要です。
-
-| 変数名 | 入力する内容 |
+| 名前 | 内容 |
 | --- | --- |
-| `SUPABASE_URL` | SupabaseのProject URL（末尾の `/rest/v1` は不要） |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabaseの `service_role` キー |
-| `ADMIN_PASSWORD` | このアプリ専用の、16文字以上のランダムで推測されにくいパスワード |
+| `VITE_SUPABASE_URL` | `https://プロジェクトID.supabase.co`（`/rest/v1`は付けない） |
+| `VITE_SUPABASE_ANON_KEY` | 同じSupabaseプロジェクトの公開 `anon` キー（publishableキーも可） |
 
-`ADMIN_PASSWORD` はiPadのパスワード管理へ保存します。SupabaseのDBパスワードやGitHubのパスワードを流用しません。設定値を後から変更した場合は**Redeployが必要**です。
+Viteを使用していないアプリですが、指定されたこの2つの変数名に対応しています。環境変数はPython APIから参照し、HTMLに埋め込みません。Productionを設定対象にし、Previewも使う場合はPreviewにも設定してください。設定変更後はRedeployが必要です。
 
-8. 「Deploy」を押します。完了後の「Visit」またはProduction Domainから、実際に発行された `https://…vercel.app` をSafariで開きます。`localhost` やクラウドマシンのIPは使いません。
-9. 管理者パスワードでログインします。画面には架空スタッフ15人と売上・評価・面談が表示されます。
+以前の `ADMIN_PASSWORD` / `SUPABASE_SERVICE_ROLE_KEY` は不要なので、Vercelから削除できます。**service_role / secretキーをanonキーの欄に入れないでください。** 公開キーだけではデータを読み書きできず、ログインと管理者許可が必要です。
 
-Vercel側のDeployment Protectionが有効な場合は、先にVercelへのログインが求められることがあります。これはアプリ内のパスワードとは別のアクセス制限です。
+## 2. テーブル・サンプル15名・RLSを作成
 
-## 5. Safariで保存を確認
+1. Safariで対象Supabaseプロジェクトを開き、「SQL Editor」→「New query」を選びます。
+2. GitHubで [`supabase/install.sql`](https://github.com/dai9395-pixel/-/blob/main/supabase/install.sql) を開き、「Raw」から全文をコピーします。
+3. SQL Editorに貼り付け「Run」で実行します。
+4. 下記でスタッフ数を確認します。新規DBなら15になります。既存DBの人数は変更しません。
 
-1. 一人を選び「目標・アクション」を編集し、サンプルの文を追記して保存します。
-2. ページを再読み込みし、再度ログインします。保存した内容が残っていることを確認します。
-3. 売上を入力して達成率・客単価が変わること、評価・面談を追加して履歴に残ることを確認します。
-4. 可能ならVercelで再デプロイ後にも同じ内容が保持されることを確認します。Supabaseの `staff` テーブルでも保存内容を確認できます。
-5. Safariの共有メニューから「ホーム画面に追加」を選ぶと、iPadのホーム画面から開けます。オンライン利用が必要です（オフラインアプリではありません）。
+```sql
+SELECT count(*) FROM public.staff;
+```
 
-アプリのパスワードはメモリ内だけに保持し、ページ再読み込み・ログアウト後には再入力が必要です。パスワードを変更したい場合はVercelの環境変数を変更して再デプロイします。
+作成内容：
 
-## 困ったとき
+- `staff`: スタッフ基本情報と売上・目標・スキル・面談をJSONBで保存。`id` と競合検出用 `version` を持ちます。
+- `karte_metadata`: 初回サンプル作成済みの印。再実行時の重複・削除後の勝手な再投入を防ぎます。
+- `karte_admins`: 管理者ユーザーIDと有効状態。通常のログインユーザーからの閲覧・変更を禁止します。
+- `is_karte_admin()`: 現在のログインユーザーが管理者かを確認する関数。
+- `staff` のRLS: 未ログインは拒否。ログイン済みでも未許可なら拒否。許可された管理者のみ読み込み・追加・編集・削除が可能。
 
-- **ログインできない**: `ADMIN_PASSWORD` の空白・大文字小文字・16文字以上を確認し、変更後にRedeployします。
-- **「設定が未完了」**: 環境変数3つが、閲覧中のProduction/Previewに設定されているか確認します。設定後にRedeployします。
-- **「データベースに接続できませんでした」**: Supabaseが稼働中か、URLとservice_roleキーが同じプロジェクトか、`setup.sql` 実行済みかを確認します。Supabase側の制限や休止も確認してください。
-- **ビルドエラー**: FrameworkがOther、Rootがリポジトリルート、Build CommandとOutputが上記の値か確認します。VercelのBuild Logsで最初のエラーを確認します。キーの値を共有しないでください。
-- **「更新の競合」**: 別の画面で更新された可能性があります。編集中の文章を控えてからページを再読み込みし、最新の内容に再入力します。
-- **データを守る**: Supabaseの削除・リセットはデータを失います。無料プランのバックアップ・休止条件を確認し、必要なバックアップを別途確保してください。
+`install.sql` は再実行しても既存のデータを保持します。このアプリのstaff/karte_adminsテーブルの既存ポリシーは管理者限定に置き換えます。他用途と同じテーブルを共有しないでください。旧 `setup.sql` だけを後から再実行せず、必ず統合版の `install.sql` を使ってください。
 
-## 試用版の範囲
+## 3. 管理者のログインアカウントを作成
 
-単独管理者向けの共有パスワード方式です。個人アカウント、店舗別権限、MFA、監査ログ、アプリ内のレート制限は未実装です。実際の氏名・売上・面談内容の運用に移る前に、Supabase Authなどによる個人認証、権限、バックアップ運用を追加してください。
+1. Supabase →「Authentication」→「Users」→「Add user」→「Create new user」で、管理者のメールアドレスと十分に強いパスワードを設定します。
+2. 確認済みユーザーとして作成する設定（Auto Confirm User）がある場合は有効にします。作成後、メール確認状態を確認してください。
+3. Authenticationの「Sign In / Providers」または「Providers」→ Emailでメール・パスワードログインを有効にし、**新規ユーザーの自己登録（Allow new users to sign up）は無効**にします。画面名はSupabaseの更新によって変わることがあります。
+4. パスワードはiPadのパスワード管理へ保存し、チャットやGitHubへ書き込まないでください。
 
-実行環境をローカルのSQLite版からVercelへ切り替えても、SQLiteのデータを自動送信しません。クラウドにはSQLで作った架空データのみを登録します。
+アプリには新規登録画面がありません。パスワードを忘れた場合はSupabaseのユーザー管理から安全に再設定してください。一般向けのパスワード再設定画面は未実装です。
+
+## 4. このユーザーを管理者として許可
+
+1. [`supabase/003_add_admin.sql`](https://github.com/dai9395-pixel/-/blob/main/supabase/003_add_admin.sql) を開き、SQL Editorへコピーします。
+2. SQL内の `REPLACE_WITH_ADMIN_EMAIL` を、直前に作成した管理者のメールアドレスに置き換えます。
+3. Runで実行します。該当ユーザーが見つからなければエラーになり、誰も許可しません。
+
+自分を管理者へ昇格させるアプリの機能はありません。将来、別の管理者を追加する場合も、同じ手順で明示的に許可します。許可された管理者はすべてのスタッフカルテにアクセスできるため、スタッフ本人のアカウントはこの一覧に追加しないでください。
+
+アクセスを取り消す場合はSQL Editorで実行します。
+
+```sql
+UPDATE public.karte_admins
+SET active = false
+WHERE user_id IN (
+ SELECT id FROM auth.users WHERE email = 'アクセスを取り消すメールアドレス'
+);
+```
+
+次のAPI/DBアクセスから拒否します。すでに画面に読み込まれた内容を遠隔消去するものではありません。
+
+## 5. Vercelで再デプロイ
+
+GitHubの `dai9395-pixel/-` のmainを利用します。初回ならVercelにImportし、Project Nameを `staff-growth-karte` などにし、FrameworkはOther、Rootはリポジトリルートです。既存Projectなら最新コミットのデプロイ完了を確認します。
+
+- Build Command: `python3 scripts/build.py`
+- Output Directory: `dist`
+- 外部Python/npm依存パッケージのインストールは不要です。
+
+設定値を追加・変更した後は、VercelのDeploymentsからRedeployしてください。完了後のProduction URL（HTTPS）をiPadのSafariで開き、Supabaseに作成したメールアドレスとパスワードでログインします。旧共有パスワードではログインできません。
+
+## 6. 保存・編集・再読み込みの確認
+
+まずは架空データで以下を確認します。
+
+1. 15名のスタッフを表示し、一人を選びます。
+2. 月間売上、目標、スキル評価、面談記録をそれぞれ保存します。
+3. Safariのページを再読み込みし、再ログインします。4種類の保存内容が残っていることを確認します。
+4. Safariを閉じ、同じURLを開いて再ログインし、保存内容が残っていることを確認します。入力途中の未保存の内容は保持しません。
+5. Supabase Table Editorのstaffテーブルに同じ内容が保存されていることを確認します。Vercel再デプロイでもデータは残ります。
+6. 権限テストをする場合は別のテストユーザーを作成し、karte_adminsに登録せずにログインします。「管理者として登録されていません」と表示され、カルテを閲覧・編集できないことを確認します。
+
+ログイン情報・アクセストークンはブラウザーのメモリ内だけで管理し、localStorageには保存しません。ページ再読み込みや終了後は再ログインしますが、カルテ自体はSupabaseに残ります。ページを開いている間のトークン期限切れはリフレッシュトークンで更新します。利用後はログアウトしてください。
+
+Safariの共有メニューから「ホーム画面に追加」すると、ホーム画面から開けます。オンライン利用が必要です。
+
+## エラーの切り分け
+
+- **設定未完了**: 変数名、設定対象（Production/Preview）、Redeployを確認します。設定が別サービスにある場合はVercelにも必要です。
+- **ログインできない**: 同じSupabaseプロジェクトのURL・公開キーを使っているか、Authenticationのユーザーが確認済みか、Emailログインが有効かを確認します。
+- **管理者として登録されていない**: `003_add_admin.sql` のメールアドレスと `karte_admins.active` を確認します。
+- **SQL・接続エラー**: `install.sql` が完了しているか、プロジェクトが稼働中かを確認します。
+- **更新の競合**: 内容を控えてから再読み込みし、最新の記録を確認して再編集します。
+- **旧画面のまま**: Vercelの最新Productionデプロイがmainを指しているか確認し、Safariを再読み込みします。
+
+SQL Editorの管理者はRLSを迂回できるので、SQL EditorでのSELECT成功だけではアプリの権限テストになりません。秘密キー・パスワード・個人情報を含むログは共有しないでください。
+
+## 検証範囲と運用
+
+自動テストでは、APIの保存・競合処理、ブラウザーでの操作・認証UI・期限切れ更新、PostgreSQL互換環境での管理者CRUD・未ログイン/非管理者拒否・自己昇格拒否・DB再起動後の保持を検証します。実Supabaseへの接続確認は、接続設定とSQL実行後に上記の手順で別途行います。
+
+本番の個人情報を入力する前に、管理者端末のロック・アカウント管理・バックアップと復元手順・利用するSupabaseプランの保管/休止条件を確認してください。MFA、店舗ごとの権限、監査ログは今後の追加機能です。

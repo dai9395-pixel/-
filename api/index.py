@@ -1,10 +1,8 @@
-"""Vercel Python Function: shared administrator password + persistent Postgres."""
-import hmac
+"""Vercel Python Function: Supabase Auth and RLS + persistent Postgres."""
 import json
-import os
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlsplit,parse_qs
-from lib.cloud_store import CloudStore,StoreError
+from lib.cloud_store import CloudStore,Supabase,StoreError
 from server import validate
 
 class handler(BaseHTTPRequestHandler):
@@ -17,16 +15,30 @@ class handler(BaseHTTPRequestHandler):
         self.end_headers();self.wfile.write(body)
     def run_request(self,method):
         try:
-            password=os.environ.get('ADMIN_PASSWORD','')
-            if len(password)<16:raise StoreError(503,'管理者パスワードの設定が未完了です。16文字以上で設定してください。')
-            token=self.headers.get('Authorization','')
-            if not hmac.compare_digest(token.encode(),('Bearer '+password).encode()):raise StoreError(401,'ログインが必要です。パスワードを確認してください。')
             query=parse_qs(urlsplit(self.path).query)
             path=urlsplit(self.path).path
+            action=query.get('auth_action',[None])[0]
+            if path.startswith('/api/auth/'):action=path.removeprefix('/api/auth/')
+            token=self.headers.get('Authorization','')
+            token=token[7:] if token.startswith('Bearer ') else ''
+            if action:
+                if method!='POST' or action not in ('login','refresh','logout'):raise StoreError(405,'許可されていない操作です。')
+                length=int(self.headers.get('Content-Length','0'))
+                if not 0 < length <= 10000:raise StoreError(400,'ログイン情報を確認してください。')
+                data=json.loads(self.rfile.read(length))
+                if not isinstance(data,dict):raise ValueError()
+                auth=Supabase()
+                if action=='logout':
+                    if not token:raise StoreError(401,'ログインが必要です。')
+                    auth.request('/auth/v1/logout?scope=local','POST',{},token)
+                    return self.reply(200,{'ok':True})
+                result=auth.login(data) if action=='login' else auth.refresh(data)
+                return self.reply(200,result)
+            if not token:raise StoreError(401,'ログインが必要です。')
             raw_id=query.get('staff_id',[None])[0]
             if path.startswith('/api/staff/') and raw_id is None:raw_id=path.removeprefix('/api/staff/')
             id=int(raw_id) if raw_id is not None else None
-            store=CloudStore()
+            store=CloudStore(token)
             if method=='GET' and id is None:return self.reply(200,store.list())
             length=int(self.headers.get('Content-Length','0'))
             if not 0 < length <= 1000000:raise StoreError(413,'送信データのサイズを確認してください。')
