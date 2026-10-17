@@ -36,6 +36,9 @@ class Supabase:
             if error.code==403:raise StoreError(403,'この操作のアクセス権限がありません。') from None
             if path.startswith('/auth/') and error.code in (400,422):raise StoreError(401,'メールアドレス・パスワード、またはログインの有効期限を確認してください。') from None
             if error.code==429:raise StoreError(429,'操作が多すぎます。少し待ってからお試しください。') from None
+            if error.code==409:raise StoreError(409,'同じ店舗名が存在するか、更新が競合しました。再読み込みして確認してください。') from None
+            if error.code==400 and path.startswith('/rest/'):
+                raise StoreError(400,'店舗・入力内容、または店舗管理マイグレーション（004_stores.sql）の適用状況を確認してください。') from None
             raise StoreError(502,'Supabaseに接続できませんでした。SQLの実行・接続設定・稼働状況を確認してください。') from None
         except (URLError,TimeoutError,ValueError):
             raise StoreError(502,'Supabaseに接続できませんでした。設定と稼働状況を確認してください。') from None
@@ -57,16 +60,35 @@ class CloudStore(Supabase):
         self.request('/auth/v1/user',token=token)
         if self.request('/rest/v1/rpc/is_karte_admin','POST',{},token=token) is not True:
             raise StoreError(403,'このアカウントは管理者として登録されていません。管理者設定を確認してください。')
-    def rest(self,method,query,data=None):return self.request('/rest/v1/staff?'+urlencode(query),method,data,self.token)
+    def rest(self,method,query,data=None,table='staff'):return self.request('/rest/v1/'+table+'?'+urlencode(query),method,data,self.token)
+    STAFF_SELECT='id,data,version,store_id,staff_sales_stores(month,store_id)'
     @staticmethod
-    def row(row):return {**row['data'],'id':row['id'],'version':row['version']}
-    def list(self):return [self.row(row) for row in self.rest('GET',{'select':'id,data,version','order':'id.asc'})]
-    def create(self,data):return self.row(self.rest('POST',{'select':'id,data,version'},{'data':data})[0])
-    def update(self,id,version,data):
-        rows=self.rest('PATCH',{'id':f'eq.{id}','version':f'eq.{version}','select':'id,data,version'},{'data':data,'version':version+1})
-        if not rows:raise StoreError(409,'更新の競合または削除がありました。再読み込みしてください。')
+    def row(row):return {**row['data'],'id':row['id'],'version':row['version'],
+        'store_id':row.get('store_id'),'sales_stores':{r['month']:r['store_id'] for r in row.get('staff_sales_stores',[])}}
+    @staticmethod
+    def payload(data):
+        data=dict(data);store_id=data.pop('store_id',None);data.pop('sales_stores',None)
+        return {'data':data,**({'store_id':store_id} if store_id is not None else {})}
+    def list(self):return [self.row(row) for row in self.rest('GET',{'select':self.STAFF_SELECT,'order':'id.asc'})]
+    def create(self,data):
+        row=self.rest('POST',{'select':self.STAFF_SELECT},self.payload(data))[0]
+        # AFTER-trigger snapshots are reliably visible in a subsequent statement.
+        return self.read_staff(row['id'])
+    def read_staff(self,id):
+        rows=self.rest('GET',{'select':self.STAFF_SELECT,'id':f'eq.{id}'})
+        if not rows:raise StoreError(409,'保存後にスタッフが削除されたか権限が変更されました。再読み込みしてください。')
         return self.row(rows[0])
+    def update(self,id,version,data):
+        rows=self.rest('PATCH',{'id':f'eq.{id}','version':f'eq.{version}','select':self.STAFF_SELECT},{**self.payload(data),'version':version+1})
+        if not rows:raise StoreError(409,'更新の競合または削除がありました。再読み込みしてください。')
+        return self.read_staff(id)
     def delete(self,id,version):
         rows=self.rest('DELETE',{'id':f'eq.{id}','version':f'eq.{version}','select':'id'})
         if not rows:raise StoreError(409,'更新の競合または削除がありました。再読み込みしてください。')
         return {'ok':True}
+    def list_stores(self):return self.rest('GET',{'select':'id,name,active,version','order':'id.asc'},table='stores')
+    def create_store(self,data):return self.rest('POST',{'select':'id,name,active,version'},data,table='stores')[0]
+    def update_store(self,id,version,data):
+        rows=self.rest('PATCH',{'id':f'eq.{id}','version':f'eq.{version}','select':'id,name,active,version'},data,table='stores')
+        if not rows:raise StoreError(409,'店舗情報が別の画面で更新されています。再読み込みしてください。')
+        return rows[0]

@@ -4,6 +4,8 @@ VercelのWeb画面 → Python API → Supabase Auth / PostgreSQL の構成です
 
 共有パスワードやservice_roleキーを使う旧方式から変更しました。スタッフデータは既存の `staff` テーブルに維持し、削除・上書きしません。旧SQLiteのデータは自動移行しません。
 
+**店舗管理の追加がある既存環境では、[店舗管理マイグレーション手順](STORE_MIGRATION.md)を優先し、サンプル作成SQLを再実行しないでください。新規環境では以下の初期設定に続けて `004_stores.sql` を適用します。**
+
 ## 1. 環境変数の確認
 
 Vercel → 対象Project → Settings → Environment Variablesに以下を設定します。既存の値が正しければ再入力は不要です。**名前には空白ではなくアンダースコアを使います。**
@@ -66,6 +68,8 @@ WHERE user_id IN (
 ```
 
 次のAPI/DBアクセスから拒否します。すでに画面に読み込まれた内容を遠隔消去するものではありません。
+
+管理者許可の後、新規環境では `supabase/004_stores.sql` もSQL Editorで実行してください。既存の環境は `STORE_MIGRATION.md` の手順で適用します。
 
 ## 5. Vercelで再デプロイ
 

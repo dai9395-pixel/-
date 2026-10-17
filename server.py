@@ -7,6 +7,8 @@ import math
 from datetime import date
 from pathlib import Path
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from lib.local_store import LocalStore
+from lib.cloud_store import StoreError
 
 ROOT = Path(__file__).resolve().parent
 DB = Path(os.environ.get('KARTE_DB', str(ROOT / 'data' / 'karte.sqlite3')))
@@ -36,6 +38,14 @@ def initialize():
                 db.execute('INSERT INTO staff(data) VALUES (?)', (json.dumps(data, ensure_ascii=False),))
             db.execute("INSERT INTO metadata VALUES ('seeded','1')")
 
+    LocalStore(DB).migrate()
+
+def validate_store(data):
+    name=data.get('name')
+    if not isinstance(name,str) or not 1 <= len(name.strip()) <= 100:raise ValueError('店舗名は1〜100文字で入力してください')
+    if type(data.get('active')) is not bool:raise ValueError('有効状態を選択してください')
+    return {'name':name.strip(),'active':data['active']}
+
 def validate(data):
     if not isinstance(data, dict): raise ValueError('データ形式が不正です')
     for key in ['name','store','role']:
@@ -64,7 +74,8 @@ def validate(data):
         date.fromisoformat(row['date'])
         for key in ['worry','challenge','feedback','next']:
             if not isinstance(row.get(key),str): raise ValueError('面談の入力内容を確認してください')
-    return {k:v for k,v in data.items() if k not in ('id','version')}
+    if 'store_id' in data and (type(data['store_id']) is not int or data['store_id']<1):raise ValueError('所属店舗を選択してください')
+    return {k:v for k,v in data.items() if k not in ('id','version','sales_stores')}
 
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self,*args,**kwargs): super().__init__(*args,directory=str(ROOT/'public'),**kwargs)
@@ -72,40 +83,36 @@ class Handler(SimpleHTTPRequestHandler):
         body=json.dumps(data,ensure_ascii=False).encode()
         self.send_response(status); self.send_header('Content-Type','application/json; charset=utf-8'); self.send_header('Cache-Control','no-store'); self.end_headers(); self.wfile.write(body)
     def do_GET(self):
-        if self.path=='/api/staff':
-            with connection() as db:
-                rows=[dict(json.loads(data),id=id,version=version) for id,data,version in db.execute('SELECT id,data,version FROM staff ORDER BY id')]
-            return self.reply(200,rows)
-        if self.path.startswith('/api/'): return self.reply(404,{'error':'見つかりません'})
+        store=LocalStore(DB)
+        if self.path=='/api/staff':return self.reply(200,store.list())
+        if self.path=='/api/stores':return self.reply(200,store.list_stores())
+        if self.path.startswith('/api/'):return self.reply(404,{'error':'見つかりません'})
         return super().do_GET()
     def mutate(self,method):
         try:
             parts=self.path.split('/')
-            if parts[:3]!=['','api','staff'] or len(parts) not in (3,4): return self.reply(404,{'error':'見つかりません'})
+            if parts[:2]!=['','api'] or len(parts) not in (3,4) or parts[2] not in ('staff','stores'):return self.reply(404,{'error':'見つかりません'})
+            stores=parts[2]=='stores';store=LocalStore(DB)
+            if stores and method=='DELETE':return self.reply(405,{'error':'店舗は削除できません。無効化してください。'})
             length=int(self.headers.get('Content-Length','0'))
-            if length>1000000: return self.reply(413,{'error':'データが大きすぎます'})
+            if not 0 <= length <= 1000000:return self.reply(413,{'error':'データが大きすぎます'})
             data=json.loads(self.rfile.read(length) or b'{}')
-            with connection() as db:
-                if method=='POST' and len(parts)==3:
-                    clean=validate(data)
-                    cursor=db.execute('INSERT INTO staff(data) VALUES (?)',(json.dumps(clean,ensure_ascii=False),))
-                    result=dict(clean,id=cursor.lastrowid,version=1)
-                elif method in ('PUT','DELETE') and len(parts)==4:
-                    id=int(parts[3]); row=db.execute('SELECT version FROM staff WHERE id=?',(id,)).fetchone()
-                    if not row: return self.reply(404,{'error':'スタッフが見つかりません'})
-                    if data.get('version')!=row[0]: return self.reply(409,{'error':'別の画面で更新されています。再読み込みしてください。'})
-                    if method=='DELETE':
-                        db.execute('DELETE FROM staff WHERE id=?',(id,)); result={'ok':True}
-                    else:
-                        clean=validate(data)
-                        db.execute('UPDATE staff SET data=?,version=version+1 WHERE id=?',(json.dumps(clean,ensure_ascii=False),id))
-                        result=dict(clean,id=id,version=row[0]+1)
-                else: return self.reply(405,{'error':'許可されていない操作です'})
-            self.reply(201 if method=='POST' else 200,result)
-        except (ValueError,KeyError,TypeError): self.reply(400,{'error':'入力内容を確認してください。必須項目・数値・日付が不正です。'})
-    def do_POST(self): self.mutate('POST')
-    def do_PUT(self): self.mutate('PUT')
-    def do_DELETE(self): self.mutate('DELETE')
+            if not isinstance(data,dict):raise ValueError()
+            if method=='POST' and len(parts)==3:
+                result=store.create_store(validate_store(data)) if stores else store.create(validate(data))
+            elif method in ('PUT','DELETE') and len(parts)==4:
+                id=int(parts[3]);version=data.get('version')
+                if id<1 or type(version) is not int or version<1:raise ValueError()
+                if method=='DELETE':result=store.delete(id,version)
+                elif stores:result=store.update_store(id,version,validate_store(data))
+                else:result=store.update(id,version,validate(data))
+            else:return self.reply(405,{'error':'許可されていない操作です'})
+            return self.reply(201 if method=='POST' else 200,result)
+        except StoreError as error:self.reply(error.status,{'error':str(error)})
+        except (ValueError,KeyError,TypeError):self.reply(400,{'error':'入力内容を確認してください。必須項目・数値・日付が不正です。'})
+    def do_POST(self):self.mutate('POST')
+    def do_PUT(self):self.mutate('PUT')
+    def do_DELETE(self):self.mutate('DELETE')
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser()
