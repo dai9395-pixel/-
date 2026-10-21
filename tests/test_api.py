@@ -52,4 +52,28 @@ class ApiTest(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as missing:self.request(path,'DELETE',{'version':row['version']})
         self.assertEqual(missing.exception.code,404)
 
+    def test_store_lifecycle_and_transfer_preserves_records(self):
+        before=self.request();person=before[0]
+        stores=self.request('/api/stores');self.assertEqual(len(stores),3)
+        new=self.request('/api/stores','POST',{'name':'新店舗','active':True})
+        with self.assertRaises(urllib.error.HTTPError) as duplicate:self.request('/api/stores','POST',{'name':' 新店舗 ','active':True})
+        self.assertEqual(duplicate.exception.code,409)
+        new=self.request(f"/api/stores/{new['id']}",'PUT',{**new,'active':False})
+        with self.assertRaises(urllib.error.HTTPError) as blocked:self.request(f"/api/staff/{person['id']}",'PUT',{**person,'store_id':new['id'],'store':new['name']})
+        self.assertEqual(blocked.exception.code,400)
+        new=self.request(f"/api/stores/{new['id']}",'PUT',{**new,'active':True,'name':'新店舗 改名'})
+        moved=self.request(f"/api/staff/{person['id']}",'PUT',{**person,'store_id':new['id'],'store':new['name']})
+        for key in ['sales','annual','monthly','vision','challenge','action','progress','skills','interviews','sales_stores']:
+            self.assertEqual(moved[key],person[key],key)
+        with self.assertRaises(urllib.error.HTTPError) as deleted:self.request(f"/api/stores/{new['id']}",'DELETE',{'version':new['version']})
+        self.assertEqual(deleted.exception.code,405)
+        new=self.request(f"/api/stores/{new['id']}",'PUT',{**new,'active':False})
+        moved=self.request(f"/api/staff/{moved['id']}",'PUT',{**moved,'vision':'無効店舗でも育成を継続'})
+        stale={**new,'version':new['version']-1}
+        with self.assertRaises(urllib.error.HTTPError) as conflict:self.request(f"/api/stores/{new['id']}",'PUT',stale)
+        self.assertEqual(conflict.exception.code,409)
+        self.process.terminate();self.process.wait();self.start()
+        rows=self.request();self.assertEqual(len(rows),15);self.assertEqual(rows[0],moved);self.assertEqual(rows[1:],before[1:])
+        self.assertFalse(next(t for t in self.request('/api/stores') if t['id']==new['id'])['active'])
+
 if __name__=='__main__':unittest.main()

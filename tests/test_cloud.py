@@ -26,9 +26,9 @@ class CloudTest(unittest.TestCase):
             store.url='https://example.supabase.co';store.key='test-only-key';store.token='access-token';self.assertEqual(store.list()[0]['name'],'架空スタッフ')
             req=upstream.call_args.args[0]
             self.assertIn('/rest/v1/staff?',req.full_url);self.assertEqual(req.get_header('Authorization'),'Bearer access-token')
-            upstream.return_value=Response([{'id':2,'version':1,'data':DATA}]);self.assertEqual(store.create(DATA)['id'],2)
-            upstream.return_value=Response([{'id':2,'version':2,'data':DATA}]);self.assertEqual(store.update(2,1,DATA)['version'],2)
-            req=upstream.call_args.args[0];self.assertIn('version=eq.1',req.full_url);self.assertEqual(req.method,'PATCH')
+            upstream.side_effect=[Response([{'id':2,'version':1,'data':DATA}]),Response([{'id':2,'version':1,'data':DATA,'store_id':3,'staff_sales_stores':[{'month':'2026-10','store_id':3}]}])];created=store.create({**DATA,'store_id':3});self.assertEqual(created['id'],2);self.assertEqual(created['sales_stores'],{'2026-10':3});self.assertEqual(json.loads(upstream.call_args_list[-2].args[0].data)['store_id'],3);upstream.side_effect=None
+            upstream.side_effect=[Response([{'id':2,'version':2,'data':DATA}]),Response([{'id':2,'version':2,'data':DATA}])];self.assertEqual(store.update(2,1,DATA)['version'],2);upstream.side_effect=None
+            req=upstream.call_args_list[-2].args[0];self.assertIn('version=eq.1',req.full_url);self.assertEqual(req.method,'PATCH')
             upstream.return_value=Response([])
             with self.assertRaises(StoreError) as error:store.update(2,1,DATA)
             self.assertEqual(error.exception.status,409)
@@ -92,7 +92,16 @@ class CloudTest(unittest.TestCase):
                 store.return_value.delete.return_value={'ok':True}
                 self.assertEqual(request('DELETE',{'version':2},path='/api/index?staff_id=2')[0],200)
                 self.assertEqual(request('DELETE',{},path='/api/index?staff_id=2')[0],400)
-                store.side_effect=StoreError(403,'管理者未登録');self.assertEqual(request()[0],403)
+                store.return_value.list_stores.return_value=[{'id':1,'name':'表参道店','active':True,'version':1}]
+                self.assertEqual(request(path='/api/index?resource=stores')[1][0]['name'],'表参道店')
+                store.return_value.create_store.return_value={'id':2,'name':'新店舗','active':True,'version':1}
+                self.assertEqual(request('POST',{'name':'新店舗','active':True},path='/api/stores')[0],201)
+                self.assertEqual(request('POST',{'name':'   ','active':True},path='/api/stores')[0],400)
+                store.return_value.update_store.return_value={'id':2,'name':'新店舗','active':False,'version':2}
+                self.assertFalse(request('PUT',{'name':'新店舗','active':False,'version':1},path='/api/index?resource=stores&store_id=2')[1]['active'])
+                self.assertEqual(request('DELETE',{'version':2},path='/api/stores/2')[0],405)
+                self.assertEqual(request(path='/api/stores',password='')[0],401)
+                store.side_effect=StoreError(403,'管理者未登録');self.assertEqual(request()[0],403);self.assertEqual(request(path='/api/stores')[0],403)
         finally:server.shutdown();server.server_close();thread.join()
 
 if __name__=='__main__':unittest.main()

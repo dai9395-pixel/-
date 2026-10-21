@@ -10,6 +10,13 @@
 
 クラウド版の構成：`api/index.py`（認証付きAPI）、`lib/cloud_store.py`（Supabase REST）、`scripts/build.py`（静的ファイルの出力）、`vercel.json`（ルーティング・ヘッダー）、`public/auth.js`（ログイン）。依存パッケージは不要です。
 
+
+## 店舗管理の追加
+
+店舗の追加・編集・無効化、スタッフ異動、店舗別集計、全店舗比較を追加しています。既存環境には `supabase/004_stores.sql` を適用します。既存カルテ本文を維持し、異動前に登録済みの月の売上集計先も保持します。
+
+**[データ保持・集計ルール・本番反映手順](STORE_MIGRATION.md)** を確認してください。本番反映は確認後に行います。新規DBの場合も `install.sql` と管理者設定に続けて `004_stores.sql` が必要です。
+
 ## Supabase版を開発環境で確認する
 
 環境に接続変数2つを安全に設定したうえで `python server.py --cloud --port 8000` を起動します。Supabase Authと同じAPIを使用し、SQLiteは作成・参照しません。設定値はコードやコマンド履歴へ直接書かないでください。SQLの実行と管理者許可はクラウド版と同じ手順が必要です。
