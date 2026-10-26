@@ -36,7 +36,7 @@ class ApiTest(unittest.TestCase):
         row=self.request(method='POST',data=row);path=f"/api/staff/{row['id']}"
         row['sales']=[dict(month='2026-10',target=1000000,actual=900000,nominated=500000,customers=90)]
         row['skills']=[dict(date='2026-10-16',scores=[1,2,3,4,5,3])]
-        row['interviews']=[dict(date='2026-10-16',worry='悩み',challenge='課題',feedback='対話',next='行動')]
+        row['interviews']=[dict(date='2026-10-16',worry='悩み',challenge='課題',feedback='対話',next='行動',due='2026-11-01',status='doing')]
         stale=dict(row)
         row=self.request(path,'PUT',row)
         with self.assertRaises(urllib.error.HTTPError) as conflict:self.request(path,'PUT',stale)

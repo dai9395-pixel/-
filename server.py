@@ -74,6 +74,12 @@ def validate(data):
         date.fromisoformat(row['date'])
         for key in ['worry','challenge','feedback','next']:
             if not isinstance(row.get(key),str): raise ValueError('面談の入力内容を確認してください')
+        due=row.get('due','')
+        if not isinstance(due,str): raise ValueError('行動期限を確認してください')
+        if due:
+            if date.fromisoformat(due).isoformat()!=due: raise ValueError('行動期限を確認してください')
+        if row.get('status','todo') not in ('todo','doing','done'): raise ValueError('行動の状況を確認してください')
+        if (due or row.get('status','todo')!='todo') and not row['next'].strip(): raise ValueError('期限・状況を設定する行動を入力してください')
     if 'store_id' in data and (type(data['store_id']) is not int or data['store_id']<1):raise ValueError('所属店舗を選択してください')
     return {k:v for k,v in data.items() if k not in ('id','version','sales_stores')}
 
