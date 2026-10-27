@@ -25,7 +25,7 @@ function render(){
  const titles={staff:['スタッフ成長カルテ','数字の管理から、人の成長を支える管理へ。'],stores:['店舗管理','一つひとつの店舗から、チームの成長を支える。'],compare:['全店舗の実績比較','店舗ごとの強みと可能性を、数字から見つける。']};
  $('#page-title').textContent=titles[view][0];$('#page-description').textContent=titles[view][1];$('#breadcrumb').textContent='スタッフ管理 / '+titles[view][0];
  document.querySelectorAll('[data-view]').forEach(b=>{b.classList.toggle('nav-active',b.dataset.view===view);b.setAttribute('aria-current',b.dataset.view===view?'page':'false')});
- $('#view-actions').innerHTML=view==='staff'?`<div class="store-toolbar"><p>店舗の異動・面談の記録は各スタッフのカルテから行えます。</p><button id="bulk-reset">売上・目標を一括リセット</button><button id="bulk-restore" ${staff.some(s=>s.reset_backup)?'':'disabled'}>リセットを元に戻す</button></div>`:`<div class="store-toolbar"><div>${view==='stores'?'<h2>登録店舗 <small>'+stores.length+'店舗</small></h2>':'<h2>月間パフォーマンス</h2>'}<p>売上・目標は月の記録先、スタッフ人数は現在の所属で集計します。</p></div><label>表示月<input type="month" id="stores-month" value="${month}" required></label>${view==='stores'?'<button class="primary" id="add-store">＋ 店舗を追加</button>':''}</div>`;
+ $('#view-actions').innerHTML=view==='staff'?`<div class="store-toolbar"><p>店舗の異動・面談の記録は各スタッフのカルテから行えます。</p><button id="bulk-reset">売上・目標を一括リセット</button><button id="bulk-restore" ${staff.some(s=>s.reset_backup)?'':'disabled'}>リセットを元に戻す</button></div>`:`<div class="store-toolbar"><div>${view==='stores'?'<h2>登録店舗 <small>'+stores.length+'店舗</small></h2>':'<h2>月間パフォーマンス</h2>'}<p>売上・目標は月の記録先、スタッフ人数は現在の所属で集計します。</p></div><label>表示月<input type="month" id="stores-month" value="${month}" required></label>${view==='stores'?'<button class="primary" id="add-store">＋ 店舗を追加</button><button data-clear-targets="all">全店舗の目標を削除</button>':''}</div>`;
  if($('#stores-month'))$('#stores-month').onchange=e=>{if(e.target.value){month=e.target.value;render()}};
  renderList();renderDetail();renderStores(grouped);
 }
@@ -45,7 +45,7 @@ function renderActions(){
 }
 
 function renderStores(grouped){
- $('#stores-view').innerHTML=`<div class="store-grid">${grouped.map(s=>`<article class="card store-card" data-store-card="${s.id}"><div class="section-title"><span class="store-emblem">⌂</span><span class="status-chip ${s.active?'':'inactive'}">${s.active?'有効':'無効'}</span></div><h3>${esc(s.name)}</h3><p class="store-headcount">所属スタッフ <strong>${s.staffCount}</strong> 名</p><dl class="store-numbers"><div><dt>月間売上</dt><dd>${yen(s.actual)}</dd></div><div><dt>売上目標</dt><dd>${yen(s.target)}</dd></div><div><dt>目標達成率</dt><dd class="green">${s.achievement===null?'—':s.achievement+'%'}</dd></div></dl>${progress(s.achievement||0)}<div class="store-card-actions"><button data-store-edit="${s.id}">店舗名を編集</button><button data-store-toggle="${s.id}" class="${s.active?'danger':''}">${s.active?'無効化':'再有効化'}</button></div><button class="subtle store-open" data-store-staff="${s.id}">所属スタッフのカルテを見る →</button></article>`).join('')||'<section class="card empty">「＋店舗を追加」から最初の店舗を登録できます。</section>'}</div><p class="store-note">無効化しても所属スタッフや育成記録は残ります。無効店舗への新規配属はできません。</p>`;
+ $('#stores-view').innerHTML=`<div class="store-grid">${grouped.map(s=>`<article class="card store-card" data-store-card="${s.id}"><div class="section-title"><span class="store-emblem">⌂</span><span class="status-chip ${s.active?'':'inactive'}">${s.active?'有効':'無効'}</span></div><h3>${esc(s.name)}</h3><p class="store-headcount">所属スタッフ <strong>${s.staffCount}</strong> 名</p><dl class="store-numbers"><div><dt>月間売上</dt><dd>${yen(s.actual)}</dd></div><div><dt>売上目標</dt><dd>${yen(s.target)}</dd></div><div><dt>目標達成率</dt><dd class="green">${s.achievement===null?'—':s.achievement+'%'}</dd></div></dl>${progress(s.achievement||0)}<div class="store-card-actions"><button data-store-edit="${s.id}">店舗名を編集</button><button data-store-toggle="${s.id}" class="${s.active?'danger':''}">${s.active?'無効化':'再有効化'}</button></div><button class="subtle store-open" data-clear-targets="${s.id}" ${s.target?'':'disabled'}>この店舗の目標を削除</button><button class="subtle store-open" data-store-staff="${s.id}">所属スタッフのカルテを見る →</button></article>`).join('')||'<section class="card empty">「＋店舗を追加」から最初の店舗を登録できます。</section>'}</div><p class="store-note">無効化しても所属スタッフや育成記録は残ります。無効店舗への新規配属はできません。</p>`;
  const max=Math.max(...grouped.map(s=>Math.max(s.actual,s.target)),1),sorted=[...grouped].sort((a,b)=>b.actual-a.actual);
  $('#compare-view').innerHTML=`<section class="card comparison-chart"><div class="section-title"><h3>店舗別売上の比較</h3><span class="section-description">${month.replace('-','年')}月・無効店舗も含む</span></div>${sorted.map(s=>`<div class="comparison-bar"><div><strong>${esc(s.name)}</strong><span>${yen(s.actual)}</span></div><div class="comparison-track"><i style="width:${s.actual/max*100}%"></i><b style="left:${Math.min(s.target/max*100,99.5)}%" title="目標 ${yen(s.target)}"></b></div></div>`).join('')||'<p class="empty">店舗を追加すると比較できます。</p>'}<div class="legend"><i></i>売上実績 <span>│</span>売上目標</div></section><section class="card"><div class="section-title"><h3>全店舗の月間実績</h3></div><div class="table-scroll" tabindex="0" aria-label="店舗実績表。横にスクロールできます"><table class="comparison-table"><thead><tr><th>店舗</th><th>現在所属</th><th>月間売上</th><th>売上目標</th><th>達成率</th><th>指名売上</th><th>客数</th><th>客単価</th></tr></thead><tbody>${grouped.map(s=>`<tr data-store-summary="${s.id}"><th>${esc(s.name)}${s.active?'':' <small>無効</small>'}</th><td>${s.staffCount}名</td><td data-metric="actual">${yen(s.actual)}</td><td>${yen(s.target)}</td><td>${s.achievement===null?'—':s.achievement+'%'}</td><td>${yen(s.nominated)}</td><td>${num(s.customers)}名</td><td>${s.customers?yen(Math.round(s.actual/s.customers)):'—'}</td></tr>`).join('')}</tbody></table></div></section><p class="store-note">店舗目標は、その月に記録されたスタッフの売上目標の合計です。異動前に登録済みの月の実績は元の店舗に残ります。</p>`;
 }
@@ -56,7 +56,7 @@ function renderDetail(){const s=current();if(!s){$('#detail').innerHTML='<sectio
 }
 function field(key,label,value='',type='text',extra=''){return `<label class="field">${label}<input name="${key}" type="${type}" value="${esc(value)}" ${extra}></label>`}
 function area(key,label,value=''){return `<label class="field">${label}<textarea name="${key}" rows="3" maxlength="5000">${esc(value)}</textarea></label>`}
-function openEditor(kind,index=null){mode=kind;editing=index;const s=current();let html='',title='';
+function openEditor(kind,index=null){$('#save-button').textContent='保存する';mode=kind;editing=index;const s=current();let html='',title='';
  if(kind==='staff'||kind==='add'){title=kind==='add'?'スタッフを追加':'基本情報を編集';const d=kind==='add'?{}:s;html=field('name','名前 *',d.name,'text','required maxlength="100"')+`<label class="field">所属店舗・異動先 *<select name="store_id" required><option value="">店舗を選択</option>${stores.filter(t=>t.active||t.id===d.store_id).map(t=>`<option value="${t.id}" ${t.id===d.store_id?'selected':''}>${esc(t.name)}${t.active?'':'（無効・現在所属）'}</option>`).join('')}</select></label>`+field('role','役職 *',d.role,'text','required maxlength="100"')+'<p class="hint">異動しても既存のカルテ・評価・面談を保持し、登録済みの月の売上は元の店舗に残ります。</p>';}
  if(kind==='sales'){title='月間売上を入力';const v=salesOf(s);html=field('month','対象月 *',month,'month','required')+[['target','月間売上目標（円）'],['actual','月間売上実績（円）'],['nominated','指名売上（円）'],['customers','客数（名）']].map(([k,l])=>field(k,l,v[k],'number','required min="0" max="1000000000" step="1"')).join('')+'<p class="hint">登録済みの月は上書きされます。客単価・達成率は自動計算します。</p>';}
  if(kind==='goals'){title='目標・行動計画を編集';html=[['vision','将来の理想像'],['annual','年間目標'],['monthly','月間目標'],['challenge','現在の課題'],['action','具体的な行動計画']].map(([k,l])=>area(k,l,s[k])).join('')+field('progress','達成状況（0〜100%）',s.progress,'number','required min="0" max="100" step="1"');}
@@ -65,7 +65,7 @@ function openEditor(kind,index=null){mode=kind;editing=index;const s=current();l
  if(kind==='store-add'||kind==='store-edit'){const t=kind==='store-edit'?stores.find(t=>t.id===index):{name:''};title=kind==='store-add'?'店舗を追加':'店舗名を編集';html=field('name','店舗名 *',t.name,'text','required maxlength="100"')+'<p class="hint">店舗名を変えても、所属スタッフとすべての記録はそのまま保持されます。</p>';}
  $('#modal-title').textContent=title;$('#fields').innerHTML=html;$('#form-error').textContent='';$('#editor').showModal();$('#fields input, #fields textarea, #fields select')?.focus();
 }
-$('#edit-form').onsubmit=async e=>{e.preventDefault();const form=Object.fromEntries(new FormData(e.target)),s=current();let data=mode==='add'?{sales:[],skills:[],interviews:[],vision:'',annual:'',monthly:'',challenge:'',action:'',progress:0}:structuredClone(s);
+$('#edit-form').onsubmit=async e=>{e.preventDefault();if(mode==='clear-targets'){await saveTargetClear();return}const form=Object.fromEntries(new FormData(e.target)),s=current();let data=mode==='add'?{sales:[],skills:[],interviews:[],vision:'',annual:'',monthly:'',challenge:'',action:'',progress:0}:structuredClone(s);
  if(mode==='staff'||mode==='add'){const t=stores.find(t=>t.id===Number(form.store_id));if(!t){$('#form-error').textContent='所属店舗を選択してください';return}Object.assign(data,{name:form.name.trim(),store:t.name,store_id:t.id,role:form.role.trim()});}
  if(mode==='sales'){const row={month:form.month,...Object.fromEntries(['target','actual','nominated','customers'].map(k=>[k,Number(form[k])]))};if(row.nominated>row.actual){$('#form-error').textContent='指名売上は売上実績以下で入力してください';return}data.sales=data.sales.filter(x=>x.month!==row.month);data.sales.push(row);}
  if(mode==='goals')Object.assign(data,form,{progress:Number(form.progress)});
@@ -76,6 +76,7 @@ $('#edit-form').onsubmit=async e=>{e.preventDefault();const form=Object.fromEntr
 };
 $('#add-staff').onclick=()=>openEditor('add');$('#close-modal').onclick=$('#cancel-modal').onclick=()=>$('#editor').close();$('#search').oninput=()=>{renderList();renderDetail()};$('#store-filter').onchange=render;
 document.addEventListener('click',async e=>{
+ const clear=e.target.closest('[data-clear-targets]');if(clear){openTargetClear(clear.dataset.clearTargets);return}
  const action=e.target.closest('[data-action-staff]');if(action){selected=Number(action.dataset.actionStaff);renderList();renderDetail();openEditor('interview',Number(action.dataset.actionIndex));return}
  if(e.target.closest('[data-quick-interview]')){openEditor('interview');return}
  if(e.target.closest('#bulk-reset')){openReset();return}
@@ -134,3 +135,39 @@ $('#reset-form').onsubmit=async e=>{
   render();$('#reset-error').textContent=`処理を停止しました（保存確認済み ${completed}名）。${err.message} 保存済みのリセットは「リセットを元に戻す」から復元できます。通信エラーの場合は、画面を閉じて最新の記録をご確認ください。`;
  }finally{resetBusy=false;$('#reset-submit').disabled=false;$('#reset-cancel').disabled=false;$('#reset-close').disabled=false}
 };
+
+
+let targetClearPlan=null, targetClearBusy=false;
+function targetRows(rows,storeId,targetMonth){
+ return rows.filter(s=>(storeId==='all'||String(s.sales_stores?.[targetMonth]??s.store_id)===storeId)&&s.sales.some(r=>r.month===targetMonth&&Number(r.target)>0));
+}
+function openTargetClear(storeId){
+ const people=targetRows(staff,storeId,month);
+ if(!people.length){toast('この月に削除する売上目標はありません');return}
+ targetClearPlan={storeId,month,versions:people.map(s=>[s.id,s.version])};mode='clear-targets';
+ const name=storeId==='all'?'全店舗':stores.find(s=>String(s.id)===storeId)?.name;
+ $('#modal-title').textContent='売上目標を削除';
+ $('#fields').innerHTML=`<p><strong>${esc(name)}・${esc(month.replace('-','年'))}月</strong></p><p>${people.length}名の月間売上目標を0円にします。</p><p>${people.map(s=>esc(s.name)).join('、')}</p><p class="hint">店舗目標はスタッフの月間売上目標の合計です。売上実績・客数・他の月・面談記録はそのまま残ります。</p><p class="hint">この削除は取り消せません。以前のリセットに売上データが含まれる場合、その復元もできなくなることがあります。</p>`;
+ $('#form-error').textContent='';$('#save-button').textContent='目標を削除する';$('#editor').showModal();
+}
+async function saveTargetClear(){
+ if(targetClearBusy)return;
+ targetClearBusy=true;$('#save-button').disabled=true;$('#cancel-modal').disabled=true;$('#close-modal').disabled=true;
+ let completed=0;
+ try{
+  const fresh=await api(),plan=targetClearPlan,people=targetRows(fresh,plan.storeId,plan.month);
+  if(JSON.stringify(people.map(s=>[s.id,s.version]))!==JSON.stringify(plan.versions))throw Error('対象の記録が更新されています。閉じて内容を確認し、もう一度お試しください。');
+  staff=fresh;
+  for(const person of people){
+   const data=structuredClone(person);data.sales=data.sales.map(r=>r.month===plan.month?{...r,target:0}:r);
+   const result=await api(`/api/staff/${data.id}`,'PUT',data);
+   staff=staff.map(s=>s.id===result.id?result:s);completed++;
+  }
+  $('#editor').close();render();toast(`${completed}名の売上目標を削除しました`);
+ }catch(err){
+  try{staff=await api()}catch{}
+  render();$('#form-error').textContent=`${completed}名の保存を確認しました。${err.message} 画面を閉じて最新の目標を確認してください。`;
+ }finally{targetClearBusy=false;$('#save-button').disabled=false;$('#cancel-modal').disabled=false;$('#close-modal').disabled=false}
+}
+$('#editor').addEventListener('cancel',e=>{if(targetClearBusy)e.preventDefault()});
+window.addEventListener('beforeunload',e=>{if(targetClearBusy){e.preventDefault();e.returnValue=''}});
